@@ -1,66 +1,52 @@
-# ===============================================
+# ================================================================
 # app.py
-# ===============================================
+# Interface Streamlit para análise de tickets e desempenho de agentes
+# ================================================================
+
 import streamlit as st
-import pandas as pd
 import requests as rq
 
-st.set_page_config(page_title="Análise de Tickets e TMA", layout="wide")
+st.set_page_config(page_title="Análise de Tickets", layout="wide")
 
-st.sidebar.title("📂 Navegação")
-menu = st.sidebar.radio(
-    "Escolha uma seção:",
-    ["Upload & Resumo", "Rankings", "Gráficos", "🔍 Insights Automáticos"]
-)
+st.title("📊 Análise de Tickets e Desempenho de Agentes")
+st.markdown("Envie um arquivo `.csv` com as colunas **agente_email**, **qtd_motivos** e **tempo_medio_atendimento**.")
 
-uploaded_file = st.sidebar.file_uploader("Envie o arquivo CSV", type=["csv"])
+# Upload do arquivo
+uploaded_file = st.file_uploader("Escolha o arquivo CSV", type=["csv"])
 
-if uploaded_file:
-    df = rq.load_data(uploaded_file)
-    st.sidebar.success(f"Arquivo carregado: {len(df)} registros")
+if uploaded_file is not None:
+    try:
+        df = rq.load_data(uploaded_file)
 
-    if menu == "Upload & Resumo":
-        st.title("📈 Resumo Geral dos Dados")
-        resumo = rq.resumo_geral(df)
-        st.table(pd.DataFrame(resumo.items(), columns=["Indicador", "Valor"]))
+        st.success("✅ Arquivo carregado com sucesso!")
+        st.dataframe(df.head())
 
-    elif menu == "Rankings":
-        st.title("🏅 Rankings de Agentes")
+        resumo_geral, por_agente, fig_qtd, fig_tempo, insights = rq.analyze_data(df)
 
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("Top 10 - Maior Volume de Tickets")
-            st.dataframe(rq.top_agentes_qtd(df))
-        with col2:
-            st.subheader("Top 10 - Menor e Maior TMA Médio")
-            menor, maior = rq.top_agentes_tma(df)
-            st.write("**Menor TMA**")
-            st.dataframe(menor)
-            st.write("**Maior TMA**")
-            st.dataframe(maior)
+        # Exibe resumo geral
+        st.subheader("📋 Resumo Geral")
+        for k, v in resumo_geral.items():
+            st.write(f"**{k}:** {v}")
 
-    elif menu == "Gráficos":
-        st.title("📊 Visualizações de Desempenho")
+        # Exibe gráficos
+        st.subheader("📈 Quantidade de Tickets por Agente")
+        st.plotly_chart(fig_qtd, use_container_width=True)
 
-        st.subheader("Distribuição Geral do TMA")
-        st.pyplot(rq.grafico_boxplot_tma(df))
+        st.subheader("⏱️ Tempo Médio de Atendimento por Agente")
+        st.plotly_chart(fig_tempo, use_container_width=True)
 
-        st.subheader("Relação entre Produtividade e Tempo Médio")
-        st.pyplot(rq.grafico_dispersa_produtividade(df))
+        # Exibe tabela detalhada
+        st.subheader("📊 Desempenho por Agente")
+        st.dataframe(por_agente, use_container_width=True)
 
-        col3, col4 = st.columns(2)
-        with col3:
-            st.subheader("TMA por Produto")
-            st.pyplot(rq.grafico_barra_media(df, "produto", "Produto"))
-        with col4:
-            st.subheader("TMA por Jornada")
-            st.pyplot(rq.grafico_barra_media(df, "jornada", "Jornada"))
+        # Exibe insights
+        st.subheader("💡 Insights")
+        st.info(insights["ponto_positivo"])
+        st.warning(insights["ponto_atencao"])
+        st.success(f"🏅 Melhor desempenho: {insights['melhor_agente']}")
+        st.error(f"⚠️ Maior tempo médio: {insights['pior_agente']}")
 
-    elif menu == "🔍 Insights Automáticos":
-        st.title("🔍 Insights Automáticos")
-        insights = rq.gerar_insights(df)
-        for item in insights:
-            st.markdown(f"- {item}")
-
+    except Exception as e:
+        st.error(f"Erro ao processar o arquivo: {e}")
 else:
-    st.info("👈 Faça o upload de um arquivo CSV para iniciar a análise.")
+    st.info("Por favor, envie um arquivo CSV para iniciar a análise.")
