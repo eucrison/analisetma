@@ -1,150 +1,95 @@
-# ===============================================
+# ================================================================
 # requests.py
-# ===============================================
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+# Módulo de leitura, limpeza, análise e visualização de dados
+# ================================================================
 
-# ==============================
-# Função principal de leitura
-# ==============================
+import pandas as pd
+import numpy as np
+import plotly.express as px
+
+# ---------------------------------------------------------------
+# Função para carregar o CSV com detecção automática
+# ---------------------------------------------------------------
 def load_data(uploaded_file):
     if uploaded_file is None:
         return None
 
-    # Tenta ler o CSV com codificações mais comuns
+    # Tenta detectar separador e encoding
     try:
-        df = pd.read_csv(uploaded_file)
+        df = pd.read_csv(uploaded_file, sep=None, engine="python")
     except UnicodeDecodeError:
         uploaded_file.seek(0)
-        df = pd.read_csv(uploaded_file, encoding="latin1")
+        df = pd.read_csv(uploaded_file, sep=None, engine="python", encoding="latin1")
     except Exception as e:
         raise Exception(f"Erro ao ler o arquivo: {e}")
 
-    # Normaliza os nomes das colunas
+    # Normaliza nomes de colunas
     df.columns = [c.strip().lower() for c in df.columns]
     return df
 
-# ==============================
-# Análises estatísticas
-# ==============================
-def resumo_geral(df):
-    resumo = {
-        "Total de registros": len(df),
-        "Total de agentes únicos": df["agente_email"].nunique(),
-        "Total de líderes únicos": df["lider"].nunique() if "lider" in df.columns else None,
-        "Tempo médio geral (s)": df["tma_segundos"].mean(),
-        "Tempo máximo (s)": df["tma_segundos"].max(),
-        "Tempo mínimo (s)": df["tma_segundos"].min(),
-        "Média de tickets por agente": df.groupby("agente_email")["qtd_motivos"].sum().mean(),
+
+# ---------------------------------------------------------------
+# Função principal de análise
+# ---------------------------------------------------------------
+def analyze_data(df):
+    # Confere colunas obrigatórias
+    required_cols = {"agente_email", "qtd_motivos", "tempo_medio_atendimento"}
+    if not required_cols.issubset(df.columns):
+        raise Exception(f"O arquivo deve conter as colunas: {', '.join(required_cols)}")
+
+    # Conversões e limpeza
+    df["qtd_motivos"] = pd.to_numeric(df["qtd_motivos"], errors="coerce").fillna(0)
+    df["tempo_medio_atendimento"] = pd.to_numeric(df["tempo_medio_atendimento"], errors="coerce").fillna(0)
+
+    # Estatísticas gerais
+    resumo_geral = {
+        "Total de agentes": df["agente_email"].nunique(),
+        "Total de tickets": int(df["qtd_motivos"].sum()),
+        "Tempo médio geral": round(df["tempo_medio_atendimento"].mean(), 2),
+        "Tempo máximo": round(df["tempo_medio_atendimento"].max(), 2),
+        "Tempo mínimo": round(df["tempo_medio_atendimento"].min(), 2),
     }
-    return resumo
 
-# ==============================
-# Rankings
-# ==============================
-def top_agentes_qtd(df, n=10):
-    return (
-        df.groupby("agente_email")["qtd_motivos"]
-        .sum()
-        .sort_values(ascending=False)
-        .head(n)
+    # Estatísticas por agente
+    por_agente = (
+        df.groupby("agente_email")
+        .agg(
+            qtd_tickets=("qtd_motivos", "sum"),
+            tempo_medio=("tempo_medio_atendimento", "mean"),
+        )
         .reset_index()
+        .sort_values(by="tempo_medio", ascending=True)
     )
 
-def top_agentes_tma(df, n=10):
-    media_tma = df.groupby("agente_email")["tma_segundos"].mean().reset_index()
-    return (
-        media_tma.sort_values("tma_segundos")
-        .head(n)
-        .rename(columns={"tma_segundos": "tma_medio"})
-    ), (
-        media_tma.sort_values("tma_segundos", ascending=False)
-        .head(n)
-        .rename(columns={"tma_segundos": "tma_medio"})
+    # Gráficos (usando Plotly Express)
+    fig_qtd = px.bar(
+        por_agente,
+        x="agente_email",
+        y="qtd_tickets",
+        title="Quantidade de Tickets por Agente",
+        color="qtd_tickets",
+        color_continuous_scale="Blues",
     )
 
-# ==============================
-# Gráficos
-# ==============================
-def grafico_boxplot_tma(df):
-    fig, ax = plt.subplots(figsize=(8, 4))
-    sns.boxplot(x=df["tma_segundos"], color="#9ecae1", ax=ax, showfliers=False)
-    ax.set_title("Distribuição do Tempo Médio de Atendimento (TMA)")
-    ax.set_xlabel("Tempo (segundos)")
-    return fig
-
-def grafico_dispersa_produtividade(df):
-    df_agente = df.groupby("agente_email").agg(
-        qtd_total=("qtd_motivos", "sum"),
-        tma_medio=("tma_segundos", "mean")
-    ).reset_index()
-
-    fig, ax = plt.subplots(figsize=(8, 6))
-    sns.scatterplot(
-        data=df_agente,
-        x="qtd_total",
-        y="tma_medio",
-        alpha=0.7,
-        ax=ax,
-        color="#3182bd"
+    fig_tempo = px.bar(
+        por_agente,
+        x="agente_email",
+        y="tempo_medio",
+        title="Tempo Médio de Atendimento por Agente",
+        color="tempo_medio",
+        color_continuous_scale="Viridis",
     )
-    ax.set_title("Relação entre Volume de Tickets e TMA por Agente")
-    ax.set_xlabel("Volume de tickets")
-    ax.set_ylabel("TMA médio (segundos)")
-    return fig
 
-def grafico_barra_media(df, coluna, titulo):
-    df_media = df.groupby(coluna)["tma_segundos"].mean().sort_values()
-    fig, ax = plt.subplots(figsize=(8, 5))
-    df_media.plot(kind="barh", ax=ax, color="#6baed6")
-    ax.set_title(f"TMA médio por {coluna.capitalize()}")
-    ax.set_xlabel("TMA médio (segundos)")
-    ax.grid(axis="x", linestyle="--", alpha=0.6)
-    return fig
+    # Tendências / insights
+    media_geral = df["tempo_medio_atendimento"].mean()
+    agentes_acima = por_agente[por_agente["tempo_medio"] > media_geral]
+    agentes_abaixo = por_agente[por_agente["tempo_medio"] <= media_geral]
 
-# ==============================
-# Insights automáticos
-# ==============================
-def gerar_insights(df):
-    insights = []
+    insights = {
+        "ponto_positivo": f"{len(agentes_abaixo)} agentes estão com tempo médio abaixo da média geral ({media_geral:.2f}).",
+        "ponto_atencao": f"{len(agentes_acima)} agentes estão com tempo médio acima da média geral ({media_geral:.2f}).",
+        "melhor_agente": por_agente.iloc[0]["agente_email"],
+        "pior_agente": por_agente.iloc[-1]["agente_email"],
+    }
 
-    tma_medio = df["tma_segundos"].mean()
-    qtd_agentes = df["agente_email"].nunique()
-    qtd_total = len(df)
-
-    # --- Eficiência geral ---
-    if tma_medio < 1200:
-        insights.append(f"⚡ O tempo médio geral de atendimento ({tma_medio:.0f}s) indica **alta eficiência operacional**.")
-    elif tma_medio < 2400:
-        insights.append(f"✅ O tempo médio geral de {tma_medio:.0f}s é **adequado** para processos de atendimento humano.")
-    else:
-        insights.append(f"⚠️ O tempo médio geral de {tma_medio:.0f}s é **alto**, sugerindo possíveis gargalos ou tickets complexos.")
-
-    # --- Outliers de TMA ---
-    outliers_alto = df[df["tma_segundos"] > tma_medio * 3]
-    if len(outliers_alto) > 0:
-        insights.append(f"🔎 Foram encontrados {len(outliers_alto)} registros com TMA muito acima da média — revisar possíveis tickets travados.")
-
-    # --- Agentes de destaque ---
-    top_qtd = top_agentes_qtd(df).iloc[0]
-    menor_tma, maior_tma = top_agentes_tma(df)
-    melhor_agente = menor_tma.iloc[0]
-    pior_agente = maior_tma.iloc[0]
-
-    insights.append(f"🏅 O agente **{top_qtd['agente_email']}** registrou o maior volume de tickets ({top_qtd['qtd_motivos']} atendimentos).")
-    insights.append(f"💨 O agente mais rápido foi **{melhor_agente['agente_email']}**, com TMA médio de {melhor_agente['tma_medio']:.0f}s.")
-    insights.append(f"🐢 O agente com maior TMA foi **{pior_agente['agente_email']}**, com média de {pior_agente['tma_medio']:.0f}s.")
-
-    # --- Variações por produto ou jornada ---
-    if "produto" in df.columns:
-        prod_maior = df.groupby("produto")["tma_segundos"].mean().idxmax()
-        prod_menor = df.groupby("produto")["tma_segundos"].mean().idxmin()
-        insights.append(f"📦 O produto com **maior TMA médio** é `{prod_maior}`, enquanto o **mais ágil** é `{prod_menor}`.")
-
-    if "jornada" in df.columns:
-        jor_maior = df.groupby("jornada")["tma_segundos"].mean().idxmax()
-        jor_menor = df.groupby("jornada")["tma_segundos"].mean().idxmin()
-        insights.append(f"🧭 A jornada com **maior tempo médio** é `{jor_maior}`, e a mais eficiente é `{jor_menor}`.")
-
-    return insights
+    return resumo_geral, por_agente, fig_qtd, fig_tempo, insights
